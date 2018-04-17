@@ -7,6 +7,8 @@ import sklearn
 import random
 from keras.models import Sequential
 from keras.layers import Dense
+from collections import deque
+
 
 # Notes:
 # Observation only has text which is blank and vision under observation_n[0] dict
@@ -17,72 +19,105 @@ from keras.layers import Dense
 # Need a predict function that calculates the estimated q scores
 # Need a recall function that pulls in random action observations, calulculates q score
 
-def generateTrainingData():
-    env = gym.make('CartPole-v0')
-    #env.configure(remotes=1)  # automatically creates a local docker container
+def sendAgentToTrainingCamp(env, agent):
     goal_steps = 500
     initial_games = 10000
-    x_train = []
-    y_train = []
+    batch_size = 32
     scores = []
-    y_train = []
     for i in range(initial_games):
-        game_memory = []
-        reward_n = 0
+        reward = 0
         game_score = 0
-        observation_n = env.reset()
+        state = env.reset()
 
         for _ in range(goal_steps):
-            action_n = chooseRndAction()
-            previous_observation_n = observation_n
-            observation_n, reward_n, done_n, info = env.step(action_n)
-            game_memory.append([observation_n,action_n, reward_n, previous_observation_n])
-            game_score += reward_n
-            env.render()
-            if done_n:
-                print("Game: ",i," complete, score: ", game_score)
+            action = agent.act(state)
+            new_state, reward, done, info = env.step(action)
+            if done:
+                print("Game: ",i ," complete, score: " , game_score)
+                new_state = None
                 break
-        scores.append(game_score)
+            agent.memory.append([state,action, reward, new_state])
+            game_score += reward
+            env.render()
+            state = new_state
 
-    x_train_array = np.array(game_memory)
-    np.save('x_train.npy',x_train_array)
+            scores.append(game_score)
+            if len(agent.memory) > batch_size:
+                randomBatch = random.sample(agent.memory, batch_size)
+                agent.replay(randomBatch)
+    return scores
 
-def predict(model,game_memories):
-     q = model.predict(game_memories)
-     return q
+class agent:
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.memory = deque(maxlen=2000)
+        self.gamma = 0.95    # discount rate
+        self.epsilon = 1.0  # exploration rate
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.learning_rate = 0.001
+        self.model = self.create_model()
 
-def chooseRndAction():
-    #if (reward_n != [0]):
-    #    print (("Rewards: {}").format(reward_n))
-    #if (observation_n != [None]):
-        #screenshot(observation_n)
-    action_n = random.randint(0,1)
-    return action_n
+    def create_model(self):
+        model = Sequential()
+        model.add(Dense(64,activation='relu',input_shape=(4,) ))
+        model.add(Dense(64,activation='relu'))
+        model.add(Dense(self.action_size,activation='linear'))
+        model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+        return model
 
-def createModel():
-    model = Sequential()
-    model.add(Dense(64,activation='relu',input_shape=(4,) ))
-    model.add(Dense(64,activation='relu'))
-    model.add(Dense(1,activation='sigmoid'))
-    return model
+    def act(self, state):
+        # Randomly choose to take a randomly chosen action to allow exploration
+        # When epsilon is high, higher chance, therefore decrease it overtime
+        # This then results in exploration early on with greater exploitation later
+        if np.random.rand() <= self.epsilon:
+            return random.randrange(self.action_size)
+        act_values = self.model.predict(state)
+        return np.argmax(act_values[0])
 
-def trainModel(model):
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    x_train = np.load('x_train.npy')
-    y_train = np.load('y_train.npy')
-    model.fit(x_train, y_train, epochs=20, batch_size=20, verbose=1)
-    return model
+    def replay(self, batch):
+        batchLen = len(batch)
+        states = np.array([ x[0] for x in batch ])
+        newStates = np.array([ x[3] for x in batch ])
 
-def replay(batchStart,batchStop,model):
-    x_train = np.load('x_train.npy')
-    predicted_q = predict(model,x_train[batchStart:batchStop])
-    for i in range(batchStart,batchStop):
-        state, action, reward, oldState = x_train[i]
+        predicted_qs = self.model.predict(states)
+        newPredicted_qs = self.model.predict(newStates)
+
+        for i in range(batchLen):
+            state, action, reward, newState = batch[i]
+            predicted_q = predicted_qs[0][i]
+            if newState is None:
+                target_q = reward
+            else:
+                target_q = reward + self.gamma * np.amax(newPredicted_qs[0][i])
+
+            # predict returns an array of actions and their associated predicted q vals
+            # I then want to update the action that was taken in this case,
+            # with the correct q value
+            prediction = predicted_qs[i]
+            # the [0] is required because of the way the predictions are returned
+            prediction[0][action] = target_q
+            x_train[i] = state
+            # This is actually an updated prediction
+            y_train[i] = prediction
+
+        model.fit(x_train,y_train, epochs=1, verbose =0)
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+        return
 
 def main():
-    #generateTrainingData()
-    model = createModel()
-    trainModel(model)
+
+    env = gym.make('CartPole-v1')
+    #env.configure(remotes=1)  # automatically creates a local docker container
+
+    # Get the number of available states and actions
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+    myagent = agent(state_size, action_size)
+    scores = sendAgentToTrainingCamp(env, myagent)
+    print (scores)
     return
 
 if __name__ == "__main__":
