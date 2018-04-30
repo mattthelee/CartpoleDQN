@@ -26,8 +26,6 @@ def sendAgentToTrainingCamp(env, agent):
         game_score = 0
         state = env.reset()
         state = np.reshape(state, [1, 4])
-        if i == 500:
-            pdb.set_trace()
         for j in range(goal_steps):
             #print("Starting goal step: ", j, " of game: ", i, " avg score: ", np.mean(scores))
             action = agent.act(state)
@@ -79,66 +77,23 @@ class agent:
         act_values = self.model.predict(state)
         return np.argmax(act_values[0])
 
-    def theirreplay(self,minibatch):
-        for state, action, reward, next_state, done in minibatch:
-            target = reward
-            if not done:
-              target = reward + self.gamma * \
-                       np.amax(self.model.predict(next_state)[0])
-            target_f = self.model.predict(state)
-            target_f[0][action] = target
-            self.model.fit(state, target_f, epochs=1, verbose=0)
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-
     def replay(self, batch):
-        batchLen = len(batch)
-        #states = np.array([ x[0] for x in batch ])
-        #newStates = np.array([ x[3] for x in batch ])
-        #print (states)
-        #predicted_qs = self.model.predict(states)
-        #newPredicted_qs = self.model.predict(newStates)
         x_train = []
         y_train = []
-
-        for i in range(batchLen):
-            state, action, reward, newState, done = batch[i]
-            #predicted_q = predicted_qs[0][i]
-            if newState is None:
+        for state, action, reward, newState, done in batch:
+            if done:
                 # Set the reward for finishing the game
                 target_q = reward
             else:
                 target_q = reward + self.gamma * np.amax(self.model.predict(newState)[0])
-                #print ("target_q ", target_q)
-                ''' if target_q > 1000:
-                    print ("Something strange happening")
-                    pdb.set_trace()
-                    '''
-
-            # predict returns an array of actions and their associated predicted q vals
-            # I then want to update the action that was taken in this case,
-            # with the correct q value
-            # TODO pass the correct value in here or allow assignment of prediction. Types seem wrong
-            #print (state)
             prediction = self.model.predict(state)
-            #print ("Prediction: ",prediction, " target_q ",target_q)
-
-            # the [0] is required because of the way the predictions are returned
             prediction[0][action] = target_q
-            #print ("stuff",state,[target_q])
-            self.model.fit(state,prediction,epochs=1,verbose=0)
             x_train.append(state[0])
-            # This is actually an updated prediction
             y_train.append(prediction[0])
-        #print ("X_train:")
-        #print(np.asarray(x_train))
-        #pdb.set_trace()
-        #print("Y_train ",y_train)
-        #self.model.fit(np.asarray(x_train),np.asarray(y_train), epochs=1, verbose =0)
+        self.model.fit(np.asarray(x_train),np.asarray(y_train),epochs=1,verbose=0)
+
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
-        #print("Finished a replay, epsilon now: ", self.epsilon)
         return
 
 def main():
