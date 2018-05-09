@@ -20,8 +20,11 @@ def sendAgentToTrainingCamp(env, agent):
     goal_steps = 500
     initial_games = 10000
     batch_size = 32
-    scores = []
+    scores = deque(maxlen=50)
     for i in range(initial_games):
+        if i > 50 and np.mean(scores) > 200:
+            print("Problem solved at game: ", i - 1)
+            break
         reward = 0
         game_score = 0
         state = env.reset()
@@ -34,8 +37,7 @@ def sendAgentToTrainingCamp(env, agent):
             agent.memory.append((state,action, reward, new_state, done))
 
             if done:
-                print("Game: ",i ," complete, score: " , game_score," avg score: ", np.mean(scores), " epsilon ", agent.epsilon)
-                new_state = None
+                print("Game: ",i ," complete, score: " , game_score," last 50 scores avg: ", np.mean(scores), " epsilon ", agent.epsilon)
                 scores.append(game_score)
                 break
             game_score += reward
@@ -94,6 +96,8 @@ class agent:
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+        else:
+            self.epsilon = 0
         return
 
 def main():
